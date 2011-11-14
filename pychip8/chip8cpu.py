@@ -1,5 +1,6 @@
 import logging
 import struct
+import pygame
 from random import randint
 from time import sleep, time
 from pychip8 import *
@@ -8,6 +9,11 @@ class Chip8CPU:
     def __init__(self, rom_name, log_level='warning'):
         f = open(rom_name, 'rb')
         self.mem = bytearray(0x1000)
+        self.mem[0] = 0xf0
+        self.mem[1] = 0x90
+        self.mem[2] = 0x90
+        self.mem[3] = 0x90
+        self.mem[4] = 0xf0
         with open(rom_name, 'rb') as f:
             i = 0
             b = f.read(1)
@@ -24,6 +30,8 @@ class Chip8CPU:
         self.sp = 0
         self.stack = []
         
+        self.screen = bytearray(64*64)
+        
         self.log = logging.getLogger("chip8-core")
         self.ch = logging.StreamHandler()
         self.ch.setLevel(logging.DEBUG)
@@ -31,6 +39,9 @@ class Chip8CPU:
         self.log.setLevel(LEVELS[log_level])
         self.loglevel = LEVELS[log_level]
         self.logEnabled = True
+        
+        pygame.init()
+        self.window = pygame.display.set_mode((640,640))
     
     def write_mem(self, addr, data):
         packed = struct.pack('>H', data)
@@ -50,6 +61,23 @@ class Chip8CPU:
         if len(self.stack) == 0:
             raise Exception('Stack Underflow!')
         return self.stack.pop()
+    
+    def update_screen(self):
+        for i,bit in enumerate(self.screen):
+            if bit == 1:
+                pygame.draw.rect(self.window, (255,255,255,255), ((i%64)*10,(i/64)*10,10,10))
+        '''for i,byte in enumerate(self.screen):
+            tmp = byte
+            j = 0
+            while tmp != 0:
+                j += 1
+                bit = tmp & 1
+                if bit:
+                    print '(%d,%d)' % (8-j, i)
+                    pygame.draw.rect(self.window, (255,255,255,255), ((8-j)*10,i*10,10,10))
+                else:
+                    pass
+                tmp >>= 1'''
     
     def parse_instruction(self, opcode):
         self.log.info('[0x%04X]: 0x%04X' % (self.pc, opcode))
@@ -131,8 +159,18 @@ class Chip8CPU:
             self.log.info('RND V%x, 0x%02X' % (x,byte))
         elif opcode >= 0xD000 and opcode < 0xF000:
             # DRW Vx, Vy, nibble
+            self.v[0xf] = 0
+            dx = self.v[x]
+            dy = self.v[y]
+            #self.log.warning('TODO DRW -- I: 0x%04X, (0x%04X, 0x%04X), n: %d' % (self.i, dx, dy, nibble))
+            for i in range(nibble):
+                byte = self.mem[self.i+i]
+                print '0x%02X' % byte
+                for j in range(8):
+                    if self.screen[dx*8 + dy*64 + j] == 1:
+                        self.v[0xf] = 1
+                    self.screen[dx*8 + dy*64 + j] ^= ((1 << j) & byte) >> j
             self.log.info('DRW V%x, V%x, %d' % (x,y,nibble))
-            self.log.warning('TODO DRW -- I: 0x%04X, (0x%04X, 0x%04X)' % (self.i, self.v[x], self.v[y]))
         elif (opcode & 0xF007) == 0xF007:
             # LD Vx, DT
             self.v[x] = self.dt
@@ -151,7 +189,8 @@ class Chip8CPU:
             self.log.info('ADD I, V%x' % x)
         elif (opcode & 0xF029) == 0xF029:
             # LD F, Vx
-            raise Exception('!!!TODO!!!')
+            self.i = self.v[x] * 5
+            self.log.info('LD F, V%x' % x)
         elif (opcode & 0xF033) == 0xF033:
             # LD B, Vx
             val = self.v[x]
@@ -173,6 +212,8 @@ class Chip8CPU:
     
     def run(self):
         while True:
+            self.update_screen()
+            pygame.display.update()
             ftime = time()
             if self.dt > 0:
                 self.dt -= 1
