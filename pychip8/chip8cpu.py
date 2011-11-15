@@ -5,6 +5,11 @@ from random import randint
 from time import sleep, time
 from pychip8 import *
 
+ARROW_UP = 273
+ARROW_DOWN = 274
+ARROW_RIGHT = 275
+ARROW_LEFT = 276
+
 class Chip8CPU:
     def __init__(self, rom_name, log_level='warning'):
         f = open(rom_name, 'rb')
@@ -142,7 +147,7 @@ class Chip8CPU:
             self.log.info('LD V%x, 0x%02X' % (x, byte))
         elif opcode >= 0x7000 and opcode < 0x8000:
             # ADD Vx, byte
-            self.v[x] += byte
+            self.v[x] = (self.v[x] + byte) % 256
             self.log.info('ADD V%x, 0x%02X' % (x, byte))
         elif (opcode & 0xF000) == 0x8000:
             if nibble == 0x0:
@@ -159,7 +164,7 @@ class Chip8CPU:
                 self.log.info('XOR V%x, V%x' % (x,y))
             elif nibble == 0x4:
                 # ADD Vx, Vy
-                self.v[x] += self.v[y]
+                self.v[x] = (self.v[x] + self.v[y]) % 256
                 self.log.info('ADD V%x, V%x' % (x,y))
             else:
                 raise Exception()
@@ -193,6 +198,20 @@ class Chip8CPU:
             # LD Vx, DT
             self.v[x] = self.dt
             self.log.info('LD V%x, DT' % x)
+        elif (opcode & 0xF00A) == 0xF00A:
+            # LD Vx, K
+            while True:
+                event = pygame.event.wait()
+                if event.type == pygame.KEYDOWN:
+                    if event.key == ARROW_UP:
+                        self.v[x] = 2
+                    if event.key == ARROW_DOWN:
+                        self.v[x] = 8
+                    if event.key == ARROW_LEFT:
+                        self.v[x] = 4
+                    if event.key == ARROW_RIGHT:
+                        self.v[x] = 6
+                    break
         elif (opcode & 0xF015) == 0xF015:
             # LD DT, Vx
             self.dt = self.v[x]
@@ -203,12 +222,12 @@ class Chip8CPU:
             self.log.info('LD ST, V%x' % x)
         elif (opcode & 0xF01E) == 0xF01E:
             # ADD I, Vx
-            self.i += x
+            self.i = (self.i + x) % 256
             self.log.info('ADD I, V%x' % x)
         elif (opcode & 0xF029) == 0xF029:
             # LD F, Vx
             self.i = self.v[x] * 5
-            self.log.warning('LD F, V%x' % x)
+            self.log.info('LD F, V%x' % x)
         elif (opcode & 0xF033) == 0xF033:
             # LD B, Vx
             val = self.v[x]
@@ -229,10 +248,16 @@ class Chip8CPU:
         self.pc += 2
     
     def run(self):
+        ftime = time()
         while True:
             self.update_screen()
             pygame.display.update()
-            ftime = time()
+            
+            if (time()-ftime) > 1.0/60:
+                ftime = time()
+                self.update_screen()
+                pygame.display.update()
+    
             if self.dt > 0:
                 self.dt -= 1
                 
@@ -242,8 +267,3 @@ class Chip8CPU:
             except Exception as e:
                 print e
                 return False
-            
-            if (time()-ftime) > 1.0/60:
-                self.log.warning('Over time!')
-            while (time()-ftime) < 1.0/60:
-                pass
