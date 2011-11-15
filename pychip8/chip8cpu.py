@@ -9,11 +9,15 @@ class Chip8CPU:
     def __init__(self, rom_name, log_level='warning'):
         f = open(rom_name, 'rb')
         self.mem = bytearray(0x1000)
-        self.mem[0] = 0xf0
-        self.mem[1] = 0x90
-        self.mem[2] = 0x90
-        self.mem[3] = 0x90
-        self.mem[4] = 0xf0
+        self.mem[0:5] =   '\xf0\x90\x90\x90\xf0'    # 0
+        self.mem[6:11] =  '\x20\x60\x20\x20\x70'    # 1
+        self.mem[12:17] = '\xf0\x10\xf0\x80\xf0'    # 2
+        self.mem[18:23] = '\xf0\x10\xf0\x10\xf0'    # 3
+        self.mem[24:29] = '\x90\x90\xf0\x10\x10'    # 4
+        self.mem[30:35] = '\xf0\x80\xf0\x10\xf0'    # 5
+        self.mem[36:41] = '\xf0\x80\xf0\x90\xf0'    # 6
+        self.mem[42:47] = '\xf0\x10\x20\x40\x40'    # 7
+        
         with open(rom_name, 'rb') as f:
             i = 0
             b = f.read(1)
@@ -30,7 +34,7 @@ class Chip8CPU:
         self.sp = 0
         self.stack = []
         
-        self.screen = bytearray(64*64)
+        self.screen = bytearray(64*32)
         
         self.log = logging.getLogger("chip8-core")
         self.ch = logging.StreamHandler()
@@ -41,7 +45,7 @@ class Chip8CPU:
         self.logEnabled = True
         
         pygame.init()
-        self.window = pygame.display.set_mode((640,640))
+        self.window = pygame.display.set_mode((640,320))
     
     def write_mem(self, addr, data):
         packed = struct.pack('>H', data)
@@ -63,9 +67,19 @@ class Chip8CPU:
         return self.stack.pop()
     
     def update_screen(self):
-        for i,bit in enumerate(self.screen):
-            if bit == 1:
-                pygame.draw.rect(self.window, (255,255,255,255), ((i%64)*10,(i/64)*10,10,10))
+        for i,byte in enumerate(self.screen):
+            #if (i%8) == 0:
+            #    print ''
+            tmp = byte
+            for j in range(8):
+                bit = (tmp & 0x80) >> 7
+                tmp <<= 1
+                if bit == 1:
+                    pygame.draw.rect(self.window, (255,255,255,255), (((i*8+j)%64)*10,((i*8+j)/64)*10,10,10))
+                    #print '1',
+                else:
+                    #print '0',
+                    pass
         '''for i,byte in enumerate(self.screen):
             tmp = byte
             j = 0
@@ -83,7 +97,7 @@ class Chip8CPU:
         self.log.info('[0x%04X]: 0x%04X' % (self.pc, opcode))
         for i,val in enumerate(self.v):
             self.log.debug('V%x: 0x%02X' % (i, val))
-        x = opcode & 0x0F00 >> 8
+        x = (opcode & 0x0F00) >> 8
         y = (opcode & 0x00F0) >> 4
         nibble = opcode & 0x000F
         addr = (opcode & 0xFFF) - 2
@@ -160,16 +174,20 @@ class Chip8CPU:
         elif opcode >= 0xD000 and opcode < 0xF000:
             # DRW Vx, Vy, nibble
             self.v[0xf] = 0
-            dx = self.v[x]
+            dx = self.v[x]/8
             dy = self.v[y]
-            #self.log.warning('TODO DRW -- I: 0x%04X, (0x%04X, 0x%04X), n: %d' % (self.i, dx, dy, nibble))
+            shift = self.v[x]%8
+            #self.log.info('DRW -- I: 0x%04X, (0x%04X, 0x%04X), n: %d' % (self.i, dx, dy, nibble))
             for i in range(nibble):
                 byte = self.mem[self.i+i]
-                print '0x%02X' % byte
-                for j in range(8):
-                    if self.screen[dx*8 + dy*64 + j] == 1:
-                        self.v[0xf] = 1
-                    self.screen[dx*8 + dy*64 + j] ^= ((1 << j) & byte) >> j
+                #print '0x%02X 0x%02X' % (byte>>shift, (byte<<(8-shift)) & 0xFF)
+                if self.screen[dx + dy*8] & (byte>>shift) or self.screen[dx + dy*8 + 1] & (byte<<(8-shift)) & 0xFF:
+                    self.v[0xf] = 1
+                self.screen[dx + dy*8] ^= (byte>>shift)
+                if shift != 0:
+                    self.screen[dx + dy*8 + 1] ^= (byte<<(8-shift)) & 0xFF
+                dy += 1
+                
             self.log.info('DRW V%x, V%x, %d' % (x,y,nibble))
         elif (opcode & 0xF007) == 0xF007:
             # LD Vx, DT
@@ -190,7 +208,7 @@ class Chip8CPU:
         elif (opcode & 0xF029) == 0xF029:
             # LD F, Vx
             self.i = self.v[x] * 5
-            self.log.info('LD F, V%x' % x)
+            self.log.warning('LD F, V%x' % x)
         elif (opcode & 0xF033) == 0xF033:
             # LD B, Vx
             val = self.v[x]
